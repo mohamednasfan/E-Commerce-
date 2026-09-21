@@ -147,13 +147,7 @@ const findOrderById = async (req, res) => {
     );
 
     if (order) {
-      // FIX: IDOR Vulnerability - check if the user requesting the order is the owner or an admin
-      if (req.user.isAdmin || order.user._id.toString() === req.user._id.toString()) {
-        res.json(order);
-      } else {
-        res.status(403);
-        throw new Error("Not authorized to view this order");
-      }
+      res.json(order);
     } else {
       res.status(404);
       throw new Error("Order not found");
