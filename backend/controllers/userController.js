@@ -2,6 +2,15 @@ import User from "../models/userModel.js";
 import asyncHandler from "../middlewares/asyncHandler.js";
 import bcrypt from "bcryptjs";
 import createToken from "../utils/createToken.js";
+import { OAuth2Client } from "google-auth-library";
+import crypto from "crypto";
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+const PASSWORD_REGEX =
+  /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$/;
+
+const isStrongPassword = (password) => PASSWORD_REGEX.test(password);
 
 const createUser = asyncHandler(async (req, res) => {
   const { username, email, password } = req.body ?? {};
@@ -23,6 +32,12 @@ const createUser = asyncHandler(async (req, res) => {
   const normalizedEmail = email.trim();
   const normalizedUsername = username.trim();
   const userExists = await User.findOne({ email: normalizedEmail });
+  if (!isStrongPassword(password)) {
+    return res.status(400).json({
+      message:
+        "Password must be at least 8 characters and include uppercase, lowercase, a number, and a special character.",
+    });
+  }
   if (userExists) {
     return res.status(400).json({ message: "User already exists" });
   }
@@ -68,33 +83,99 @@ const loginUser = asyncHandler(async (req, res) => {
 
   const existingUser = await User.findOne({ email: email.trim() });
 
-  if (existingUser) {
-    const isPasswordValid = await bcrypt.compare(
-      password,
-      existingUser.password
-    );
-
-    if (isPasswordValid) {
-      createToken(res, existingUser._id);
-
-      res.status(201).json({
-        _id: existingUser._id,
-        username: existingUser.username,
-        email: existingUser.email,
-        isAdmin: existingUser.isAdmin,
-      });
-      return;
-    }
+  if (!existingUser) {
+    return res.status(401).json({ message: "Invalid email or password" });
   }
 
-  // Generic response for both unknown email and wrong password
-  // to avoid user-enumeration via timing/response differences.
+  if (existingUser.lockUntil && existingUser.lockUntil > Date.now()) {
+    return res.status(423).json({
+      message: "Account temporarily locked. Please try again later.",
+    });
+  }
+
+  const isPasswordValid = await bcrypt.compare(password, existingUser.password);
+
+  if (isPasswordValid) {
+    existingUser.loginAttempts = 0;
+    existingUser.lockUntil = null;
+    await existingUser.save();
+
+    createToken(res, existingUser._id);
+
+    res.status(200).json({
+      _id: existingUser._id,
+      username: existingUser.username,
+      email: existingUser.email,
+      isAdmin: existingUser.isAdmin,
+    });
+    return;
+  }
+
+  const maxLoginAttempts = 5;
+  const lockDurationMs = 15 * 60 * 1000;
+  const nextAttempts = (existingUser.loginAttempts || 0) + 1;
+
+  existingUser.loginAttempts = nextAttempts;
+
+  if (nextAttempts >= maxLoginAttempts) {
+    existingUser.lockUntil = new Date(Date.now() + lockDurationMs);
+    await existingUser.save();
+    return res.status(423).json({
+      message: "Account temporarily locked. Please try again later.",
+    });
+  }
+
+  await existingUser.save();
   return res.status(401).json({ message: "Invalid email or password" });
+});
+
+const loginWithGoogle = asyncHandler(async (req, res) => {
+  const { credential } = req.body;
+
+  if (!credential || !process.env.GOOGLE_CLIENT_ID) {
+    res.status(400);
+    throw new Error("Google sign-in is not configured.");
+  }
+
+  const ticket = await googleClient.verifyIdToken({
+    idToken: credential,
+    audience: process.env.GOOGLE_CLIENT_ID,
+  });
+  const googleUser = ticket.getPayload();
+
+  if (!googleUser?.sub || !googleUser.email || !googleUser.email_verified) {
+    res.status(401);
+    throw new Error("Google account could not be verified.");
+  }
+
+  let user = await User.findOne({
+    $or: [{ googleId: googleUser.sub }, { email: googleUser.email }],
+  });
+
+  if (!user) {
+    user = await User.create({
+      username: googleUser.name || googleUser.email.split("@")[0],
+      email: googleUser.email,
+      password: await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10),
+      googleId: googleUser.sub,
+    });
+  } else if (!user.googleId) {
+    user.googleId = googleUser.sub;
+    await user.save();
+  }
+
+  createToken(res, user._id);
+  res.status(200).json({
+    _id: user._id,
+    username: user.username,
+    email: user.email,
+    isAdmin: user.isAdmin,
+  });
 });
 
 const logoutCurrentUser = asyncHandler(async (req, res) => {
   res.cookie("jwt", "", {
-    httyOnly: true,
+    httpOnly: true,
     expires: new Date(0),
   });
 
@@ -201,6 +282,7 @@ const updateUserById = asyncHandler(async (req, res) => {
 export {
   createUser,
   loginUser,
+  loginWithGoogle,
   logoutCurrentUser,
   getAllUsers,
   getCurrentUserProfile,

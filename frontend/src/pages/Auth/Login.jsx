@@ -3,8 +3,10 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
 import Loader from "../../components/Loader";
 import { useLoginMutation } from "../../redux/api/usersApiSlice";
+import { useLoginWithGoogleMutation } from "../../redux/api/usersApiSlice";
 import { setCredentials } from "../../redux/features/auth/authSlice";
 import { toast } from "react-toastify";
+import { GoogleLogin } from "@react-oauth/google";
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -14,6 +16,8 @@ const Login = () => {
   const navigate = useNavigate();
 
   const [login, { isLoading }] = useLoginMutation();
+  const [loginWithGoogle, { isLoading: isGoogleLoading }] =
+    useLoginWithGoogleMutation();
 
   const { userInfo } = useSelector((state) => state.auth);
 
@@ -36,6 +40,16 @@ const Login = () => {
       navigate(redirect);
     } catch (err) {
       toast.error(err?.data?.message || err.error);
+    }
+  };
+
+  const googleLoginHandler = async (response) => {
+    try {
+      const user = await loginWithGoogle({ credential: response.credential }).unwrap();
+      dispatch(setCredentials(user));
+      navigate(redirect);
+    } catch (err) {
+      toast.error(err?.data?.message || "Google sign-in failed");
     }
   };
 
@@ -90,6 +104,17 @@ const Login = () => {
 
             {isLoading && <Loader />}
           </form>
+
+          {import.meta.env.VITE_GOOGLE_CLIENT_ID && (
+            <div className="mt-4">
+              <GoogleLogin
+                onSuccess={googleLoginHandler}
+                onError={() => toast.error("Google sign-in failed")}
+                useOneTap={false}
+              />
+              {isGoogleLoading && <Loader />}
+            </div>
+          )}
 
           <div className="mt-4">
             <p className="text-white">
