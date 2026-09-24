@@ -19,8 +19,14 @@ connectDB();
 
 const app = express();
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Defense-in-depth: use simple query parser so ?keyword[$gt]= stays a
+// literal string instead of becoming {keyword:{$gt:""}} via qs nesting.
+app.set("query parser", "simple");
+
+app.use(express.json({ limit: "100kb" }));
+// NoSQL hardening: extended:false avoids qs nesting (field[$ne]=) in urlencoded bodies.
+// JSON bodies are still strictly type-checked in controllers.
+app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 
 app.use("/api/users", userRoutes);

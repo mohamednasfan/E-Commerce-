@@ -1,21 +1,26 @@
 import Category from "../models/categoryModel.js";
 import asyncHandler from "../middlewares/asyncHandler.js";
+import { isValidObjectId } from "mongoose";
 
 const createCategory = asyncHandler(async (req, res) => {
   try {
-    const { name } = req.body;
+    const body =
+      req.body !== null && typeof req.body === "object" ? req.body : {};
+    const { name } = body;
 
-    if (!name) {
-      return res.json({ error: "Name is required" });
+    // NoSQL fix: reject objects like {"$ne":null} before findOne({name}).
+    if (typeof name !== "string" || name.trim() === "") {
+      return res.status(400).json({ error: "Name is required" });
     }
 
-    const existingCategory = await Category.findOne({ name });
+    const trimmedName = name.trim().slice(0, 32);
+    const existingCategory = await Category.findOne({ name: trimmedName });
 
     if (existingCategory) {
       return res.json({ error: "Already exists" });
     }
 
-    const category = await new Category({ name }).save();
+    const category = await new Category({ name: trimmedName }).save();
     res.json(category);
   } catch (error) {
     console.log(error);
@@ -25,8 +30,22 @@ const createCategory = asyncHandler(async (req, res) => {
 
 const updateCategory = asyncHandler(async (req, res) => {
   try {
-    const { name } = req.body;
+    const body =
+      req.body !== null && typeof req.body === "object" ? req.body : {};
+    const { name } = body;
     const { categoryId } = req.params;
+
+    if (
+      typeof categoryId !== "string" ||
+      categoryId.trim() === "" ||
+      !isValidObjectId(categoryId)
+    ) {
+      return res.status(400).json({ error: "Invalid category id" });
+    }
+    // NoSQL fix: name must be a plain string, never an operator object.
+    if (typeof name !== "string" || name.trim() === "") {
+      return res.status(400).json({ error: "Name is required" });
+    }
 
     const category = await Category.findOne({ _id: categoryId });
 
@@ -34,7 +53,7 @@ const updateCategory = asyncHandler(async (req, res) => {
       return res.status(404).json({ error: "Category not found" });
     }
 
-    category.name = name;
+    category.name = name.trim().slice(0, 32);
 
     const updatedCategory = await category.save();
     res.json(updatedCategory);
@@ -46,7 +65,16 @@ const updateCategory = asyncHandler(async (req, res) => {
 
 const removeCategory = asyncHandler(async (req, res) => {
   try {
-    const removed = await Category.findByIdAndRemove(req.params.categoryId);
+    if (
+      typeof req.params.categoryId !== "string" ||
+      !isValidObjectId(req.params.categoryId)
+    ) {
+      return res.status(400).json({ error: "Invalid category id" });
+    }
+    const removed = await Category.findByIdAndDelete(req.params.categoryId);
+    if (!removed) {
+      return res.status(404).json({ error: "Category not found" });
+    }
     res.json(removed);
   } catch (error) {
     console.error(error);
@@ -66,7 +94,13 @@ const listCategory = asyncHandler(async (req, res) => {
 
 const readCategory = asyncHandler(async (req, res) => {
   try {
+    if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid category id" });
+    }
     const category = await Category.findOne({ _id: req.params.id });
+    if (!category) {
+      return res.status(404).json({ error: "Category not found" });
+    }
     res.json(category);
   } catch (error) {
     console.log(error);
