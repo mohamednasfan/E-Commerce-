@@ -1,6 +1,7 @@
 import Order from "../models/orderModel.js";
 import Product from "../models/productModel.js";
 import mongoose, { isValidObjectId } from "mongoose";
+import { sanitizeText, sanitizeImageUrl, containsXss } from "../utils/sanitize.js";
 
 // Utility Function
 function calcPrices(orderItems) {
@@ -86,16 +87,20 @@ const createOrder = async (req, res) => {
 
       // Whitelist only: never spread client object (prevents price override
       // attempts and operator keys like $set from reaching the DB layer).
+      // XSS fix: client name/image are display-only; sanitize (server is
+      // source of truth for price). Fall back to DB values if sanitized empty.
+      const cleanItemName =
+        typeof itemFromClient.name === "string"
+          ? sanitizeText(itemFromClient.name, 200)
+          : "";
+      const cleanItemImage =
+        typeof itemFromClient.image === "string"
+          ? sanitizeImageUrl(itemFromClient.image, matchingItemFromDB.image)
+          : matchingItemFromDB.image;
       dbOrderItems.push({
-        name:
-          typeof itemFromClient.name === "string"
-            ? itemFromClient.name.slice(0, 200)
-            : matchingItemFromDB.name,
+        name: cleanItemName || matchingItemFromDB.name,
         qty: toFiniteNumber(itemFromClient.qty),
-        image:
-          typeof itemFromClient.image === "string"
-            ? itemFromClient.image.slice(0, 500)
-            : matchingItemFromDB.image,
+        image: cleanItemImage,
         product: itemFromClient._id,
         price: matchingItemFromDB.price,
       });
@@ -105,7 +110,16 @@ const createOrder = async (req, res) => {
       shippingAddress !== null && typeof shippingAddress === "object"
         ? shippingAddress
         : {};
-    const strField = (v) => (typeof v === "string" ? v.slice(0, 200) : "");
+    // XSS fix: strip HTML tags from address fields. Reject outright if XSS.
+    const strField = (v) =>
+      typeof v === "string" ? sanitizeText(v, 200) : "";
+    if (
+      [address.address, address.city, address.postalCode, address.country].some(
+        (v) => typeof v === "string" && containsXss(v)
+      )
+    ) {
+      return res.status(400).json({ error: "Invalid shipping address" });
+    }
     const cleanAddress = {
       address: strField(address.address),
       city: strField(address.city),
@@ -124,11 +138,18 @@ const createOrder = async (req, res) => {
     const { itemsPrice, taxPrice, shippingPrice, totalPrice } =
       calcPrices(dbOrderItems);
 
+    const cleanPaymentMethod = sanitizeText(paymentMethod, 50);
+    if (!cleanPaymentMethod) {
+      return res.status(400).json({ error: "Payment method is required" });
+    }
+    if (typeof paymentMethod === "string" && containsXss(paymentMethod)) {
+      return res.status(400).json({ error: "Invalid payment method" });
+    }
     const order = new Order({
       orderItems: dbOrderItems,
       user: req.user._id,
       shippingAddress: cleanAddress,
-      paymentMethod: paymentMethod.trim().slice(0, 50),
+      paymentMethod: cleanPaymentMethod,
       itemsPrice,
       taxPrice,
       shippingPrice,
@@ -233,8 +254,9 @@ const markOrderAsPaid = async (req, res) => {
       req.body !== null && typeof req.body === "object" ? req.body : {};
     const payer =
       body.payer !== null && typeof body.payer === "object" ? body.payer : {};
+    // XSS fix: strip tags from PayPal-returned strings before storing.
     const asString = (v, max = 200) =>
-      typeof v === "string" ? v.slice(0, max) : undefined;
+      typeof v === "string" ? sanitizeText(v, max) || undefined : undefined;
     const order = await Order.findById(req.params.id);
 
     if (order) {

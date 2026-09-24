@@ -1,6 +1,12 @@
 import asyncHandler from "../middlewares/asyncHandler.js";
 import Product from "../models/productModel.js";
 import mongoose, { isValidObjectId } from "mongoose";
+import {
+  sanitizeText,
+  sanitizeImageUrl,
+  sanitizeComment,
+  containsXss,
+} from "../utils/sanitize.js";
 
 // Strict numeric parsing: rejects booleans/objects/arrays/null/"" which
 // Number() would coerce (true->1, ""->0, []->0). Only plain string/number.
@@ -44,14 +50,29 @@ const addProduct = asyncHandler(async (req, res) => {
       return res.status(400).json({ error: "Quantity is required" });
     }
 
+    // Stored-XSS fix: reject HTML / script payloads outright.
+    if (containsXss(name) || containsXss(description) || containsXss(brand)) {
+      return res.status(400).json({ error: "Invalid text content" });
+    }
+
+    // XSS fix: store plain text only, strip tags; allowlist image URLs.
+    const cleanName = sanitizeText(name, 200);
+    const cleanDescription = sanitizeText(description, 5000);
+    const cleanBrand = sanitizeText(brand, 200);
+    if (!cleanName || !cleanDescription || !cleanBrand) {
+      return res.status(400).json({ error: "Invalid text content" });
+    }
     const product = new Product({
-      name: name.trim(),
-      description: description.trim(),
+      name: cleanName,
+      description: cleanDescription,
       price: priceNum,
       category,
       quantity: quantityNum,
-      brand: brand.trim(),
-      image: typeof fields.image === "string" ? fields.image : "no-image",
+      brand: cleanBrand,
+      image:
+        typeof fields.image === "string"
+          ? sanitizeImageUrl(fields.image, "no-image")
+          : "no-image",
       countInStock: (() => {
         const c = toFiniteNumber(fields.countInStock);
         return Number.isFinite(c) ? c : quantityNum;
@@ -97,15 +118,27 @@ const updateProductDetails = asyncHandler(async (req, res) => {
       return res.status(400).json({ error: "Quantity is required" });
     }
 
+    // Stored-XSS fix: reject HTML / script payloads outright.
+    if (containsXss(name) || containsXss(description) || containsXss(brand)) {
+      return res.status(400).json({ error: "Invalid text content" });
+    }
+
+    // XSS fix: store plain text only, strip tags.
+    const cleanName = sanitizeText(name, 200);
+    const cleanDescription = sanitizeText(description, 5000);
+    const cleanBrand = sanitizeText(brand, 200);
+    if (!cleanName || !cleanDescription || !cleanBrand) {
+      return res.status(400).json({ error: "Invalid text content" });
+    }
     const product = await Product.findByIdAndUpdate(
       req.params.id,
       {
-        name: name.trim(),
-        description: description.trim(),
+        name: cleanName,
+        description: cleanDescription,
         price: priceNum,
         category,
         quantity: quantityNum,
-        brand: brand.trim(),
+        brand: cleanBrand,
       },
       { new: true }
     );
@@ -255,6 +288,15 @@ const addProductReview = asyncHandler(async (req, res) => {
     if (typeof comment !== "string" || comment.trim() === "") {
       return res.status(400).json({ error: "Comment is required" });
     }
+    // Stored-XSS fix: reject HTML / script payloads outright (400) instead
+    // of storing them. e.g. "<script>alert('XSS-review')</script>" must not
+    // return 201. sanitizeComment below remains as defense-in-depth.
+    if (containsXss(comment)) {
+      return res.status(400).json({ error: "Invalid comment" });
+    }
+    if (comment.length > 1000) {
+      return res.status(400).json({ error: "Invalid comment" });
+    }
     const product = await Product.findById(req.params.id);
 
     if (product) {
@@ -267,10 +309,16 @@ const addProductReview = asyncHandler(async (req, res) => {
         throw new Error("Product already reviewed");
       }
 
+      // XSS fix: strip HTML tags from comment; sanitize stored username too
+      // (protects old DB rows created before sanitization).
+      const cleanComment = sanitizeComment(comment, 1000);
+      if (!cleanComment) {
+        return res.status(400).json({ error: "Invalid comment" });
+      }
       const review = {
-        name: req.user.username,
+        name: sanitizeText(req.user.username, 50) || "Anonymous",
         rating: ratingNum,
-        comment: comment.trim().slice(0, 1000),
+        comment: cleanComment,
         user: req.user._id,
       };
 

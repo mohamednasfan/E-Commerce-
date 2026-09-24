@@ -5,6 +5,7 @@ import createToken from "../utils/createToken.js";
 import { isValidObjectId } from "mongoose";
 import { OAuth2Client } from "google-auth-library";
 import crypto from "crypto";
+import { sanitizeUsername, containsXss } from "../utils/sanitize.js";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
@@ -23,7 +24,12 @@ const createUser = asyncHandler(async (req, res) => {
   if (typeof username !== "string") {
     return res.status(400).json({ message: "Invalid username" });
   }
-  const normalizedUsername = username.trim().slice(0, 50);
+  if (containsXss(username)) {
+    return res.status(400).json({ message: "Invalid username" });
+  }
+  // XSS fix: strip HTML tags / < > before length check so payloads like
+  // `<img onerror>` can't be stored and bypass validation.
+  const normalizedUsername = sanitizeUsername(username, 50);
   if (normalizedUsername.length < 3 || normalizedUsername.length > 50) {
     return res.status(400).json({ message: "Username must be 3-50 characters" });
   }
@@ -168,8 +174,12 @@ const loginWithGoogle = asyncHandler(async (req, res) => {
   });
 
   if (!user) {
+    // XSS fix: Google display names are user-controlled; sanitize before store.
+    const rawGoogleName =
+      googleUser.name || googleUser.email.split("@")[0] || "Google User";
+    const cleanGoogleName = sanitizeUsername(rawGoogleName, 50) || "Google User";
     user = await User.create({
-      username: googleUser.name || googleUser.email.split("@")[0],
+      username: cleanGoogleName,
       email: googleUser.email,
       password: await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10),
       googleId: googleUser.sub,
@@ -224,11 +234,15 @@ const updateCurrentUserProfile = asyncHandler(async (req, res) => {
   if (user) {
     const body = req.body ?? {};
     // NoSQL fix + strength: reject operator objects, enforce 3-50 / email format / 6-72.
+    // XSS fix: strip tags before storing username.
     if (body.username !== undefined) {
       if (typeof body.username !== "string") {
         return res.status(400).json({ message: "Invalid username" });
       }
-      const trimmed = body.username.trim().slice(0, 50);
+      if (containsXss(body.username)) {
+        return res.status(400).json({ message: "Invalid username" });
+      }
+      const trimmed = sanitizeUsername(body.username, 50);
       if (trimmed.length < 3 || trimmed.length > 50) {
         return res.status(400).json({ message: "Username must be 3-50 characters" });
       }
@@ -323,12 +337,17 @@ const updateUserById = asyncHandler(async (req, res) => {
     const body = req.body ?? {};
     // NoSQL fix + strength: only plain strings, username 3-50, email format, strict isAdmin.
     // Rejects {"$ne":null} objects and Boolean({}) -> true coercion.
+    // XSS fix: strip tags before storing username.
     if (body.username !== undefined) {
       if (typeof body.username !== "string") {
         res.status(400);
         throw new Error("Username must be 3-50 characters");
       }
-      const trimmed = body.username.trim().slice(0, 50);
+      if (containsXss(body.username)) {
+        res.status(400);
+        throw new Error("Username must be 3-50 characters");
+      }
+      const trimmed = sanitizeUsername(body.username, 50);
       if (trimmed.length < 3 || trimmed.length > 50) {
         res.status(400);
         throw new Error("Username must be 3-50 characters");
