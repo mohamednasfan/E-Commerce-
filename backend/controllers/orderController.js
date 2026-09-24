@@ -1,6 +1,6 @@
 import Order from "../models/orderModel.js";
 import Product from "../models/productModel.js";
-import { isValidObjectId } from "mongoose";
+import mongoose, { isValidObjectId } from "mongoose";
 
 // Utility Function
 function calcPrices(orderItems) {
@@ -27,6 +27,16 @@ function calcPrices(orderItems) {
   };
 }
 
+// Strict numeric: rejects boolean/object/""/array that Number() coerces (true->1, ""->0).
+const toFiniteNumber = (v) => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : NaN;
+  if (typeof v !== "string") return NaN;
+  const t = v.trim();
+  if (t === "") return NaN;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : NaN;
+};
+
 const createOrder = async (req, res) => {
   try {
     const body =
@@ -48,7 +58,7 @@ const createOrder = async (req, res) => {
       ) {
         return res.status(400).json({ error: "Invalid order item id" });
       }
-      const qty = Number(item.qty);
+      const qty = toFiniteNumber(item.qty);
       if (!Number.isInteger(qty) || qty < 1) {
         return res.status(400).json({ error: "Invalid order item quantity" });
       }
@@ -59,7 +69,7 @@ const createOrder = async (req, res) => {
     }
 
     const itemsFromDB = await Product.find({
-      _id: { $in: itemIds },
+      _id: mongoose.trusted({ $in: itemIds }),
     });
 
     const dbOrderItems = [];
@@ -81,7 +91,7 @@ const createOrder = async (req, res) => {
           typeof itemFromClient.name === "string"
             ? itemFromClient.name.slice(0, 200)
             : matchingItemFromDB.name,
-        qty: Number(itemFromClient.qty),
+        qty: toFiniteNumber(itemFromClient.qty),
         image:
           typeof itemFromClient.image === "string"
             ? itemFromClient.image.slice(0, 500)
@@ -195,6 +205,9 @@ const calcualteTotalSalesByDate = async (req, res) => {
 
 const findOrderById = async (req, res) => {
   try {
+    if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid order id" });
+    }
     const order = await Order.findById(req.params.id).populate(
       "user",
       "username email"
@@ -247,6 +260,9 @@ const markOrderAsPaid = async (req, res) => {
 
 const markOrderAsDelivered = async (req, res) => {
   try {
+    if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid order id" });
+    }
     const order = await Order.findById(req.params.id);
 
     if (order) {

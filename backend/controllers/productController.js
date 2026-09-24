@@ -1,6 +1,17 @@
 import asyncHandler from "../middlewares/asyncHandler.js";
 import Product from "../models/productModel.js";
-import { isValidObjectId } from "mongoose";
+import mongoose, { isValidObjectId } from "mongoose";
+
+// Strict numeric parsing: rejects booleans/objects/arrays/null/"" which
+// Number() would coerce (true->1, ""->0, []->0). Only plain string/number.
+const toFiniteNumber = (v) => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : NaN;
+  if (typeof v !== "string") return NaN;
+  const t = v.trim();
+  if (t === "") return NaN;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : NaN;
+};
 
 const addProduct = asyncHandler(async (req, res) => {
   try {
@@ -21,14 +32,14 @@ const addProduct = asyncHandler(async (req, res) => {
     if (typeof description !== "string" || description.trim() === "") {
       return res.status(400).json({ error: "Description is required" });
     }
-    const priceNum = Number(price);
+    const priceNum = toFiniteNumber(price);
     if (!Number.isFinite(priceNum)) {
       return res.status(400).json({ error: "Price is required" });
     }
     if (typeof category !== "string" || !isValidObjectId(category)) {
       return res.status(400).json({ error: "Category is required" });
     }
-    const quantityNum = Number(quantity);
+    const quantityNum = toFiniteNumber(quantity);
     if (!Number.isInteger(quantityNum)) {
       return res.status(400).json({ error: "Quantity is required" });
     }
@@ -41,9 +52,10 @@ const addProduct = asyncHandler(async (req, res) => {
       quantity: quantityNum,
       brand: brand.trim(),
       image: typeof fields.image === "string" ? fields.image : "no-image",
-      countInStock: Number.isFinite(Number(fields.countInStock))
-        ? Number(fields.countInStock)
-        : quantityNum,
+      countInStock: (() => {
+        const c = toFiniteNumber(fields.countInStock);
+        return Number.isFinite(c) ? c : quantityNum;
+      })(),
     });
     await product.save();
     res.json(product);
@@ -73,14 +85,14 @@ const updateProductDetails = asyncHandler(async (req, res) => {
     if (typeof description !== "string" || description.trim() === "") {
       return res.status(400).json({ error: "Description is required" });
     }
-    const priceNum = Number(price);
+    const priceNum = toFiniteNumber(price);
     if (!Number.isFinite(priceNum)) {
       return res.status(400).json({ error: "Price is required" });
     }
     if (typeof category !== "string" || !isValidObjectId(category)) {
       return res.status(400).json({ error: "Category is required" });
     }
-    const quantityNum = Number(quantity);
+    const quantityNum = toFiniteNumber(quantity);
     if (!Number.isInteger(quantityNum)) {
       return res.status(400).json({ error: "Quantity is required" });
     }
@@ -113,7 +125,13 @@ const updateProductDetails = asyncHandler(async (req, res) => {
 
 const removeProduct = asyncHandler(async (req, res) => {
   try {
+    if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid product id" });
+    }
     const product = await Product.findByIdAndDelete(req.params.id);
+    if (!product) {
+      return res.status(404).json({ error: "Product not found" });
+    }
     res.json(product);
   } catch (error) {
     console.error(error);
@@ -124,6 +142,23 @@ const removeProduct = asyncHandler(async (req, res) => {
 const fetchProducts = asyncHandler(async (req, res) => {
   try {
     const pageSize = 6;
+
+    // NoSQL injection fix: strict whitelist of query keys.
+    // With `simple` query parser, ?keyword[$ne]=null parses as
+    // { "keyword[$ne]": "null" } so req.query.keyword is undefined and
+    // would fall through to find({}) dumping all products.
+    // Reject any key other than plain `keyword`.
+    const queryKeys = Object.keys(req.query ?? {});
+    if (queryKeys.some((k) => k !== "keyword")) {
+      return res.status(400).json({ error: "Invalid search keyword" });
+    }
+    // Backstop for encoded operator keys regardless of parser
+    // (e.g. ?keyword%5B$ne%5D=null). Allows literal `$` in values
+    // like ?keyword=$20 which is safely escaped below.
+    const rawUrl = req.originalUrl || "";
+    if (/keyword\s*(%5b|\[)/i.test(rawUrl)) {
+      return res.status(400).json({ error: "Invalid search keyword" });
+    }
 
     // NoSQL injection fix: only accept keyword as a plain string.
     // Express extended query parser turns ?keyword[$gt]= into an object,
@@ -143,17 +178,20 @@ const fetchProducts = asyncHandler(async (req, res) => {
         .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
       if (safeKeyword) {
+        // sanitizeFilter=true would otherwise wrap our own $regex in $eq
+        // causing CastError. safeKeyword is escaped + capped above, so
+        // mark only this server-built operator object as trusted.
         keyword = {
-          name: {
+          name: mongoose.trusted({
             $regex: safeKeyword,
             $options: "i",
-          },
+          }),
         };
       }
     }
 
-    const count = await Product.countDocuments({ ...keyword });
-    const products = await Product.find({ ...keyword }).limit(pageSize);
+    const count = await Product.countDocuments(keyword);
+    const products = await Product.find(keyword).limit(pageSize);
 
     res.json({
       products,
@@ -169,6 +207,9 @@ const fetchProducts = asyncHandler(async (req, res) => {
 
 const fetchProductById = asyncHandler(async (req, res) => {
   try {
+    if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid product id" });
+    }
     const product = await Product.findById(req.params.id);
     if (product) {
       return res.json(product);
@@ -187,7 +228,7 @@ const fetchAllProducts = asyncHandler(async (req, res) => {
     const products = await Product.find({})
       .populate("category")
       .limit(12)
-      .sort({ createAt: -1 });
+      .sort({ createdAt: -1 });
 
     res.json(products);
   } catch (error) {
@@ -206,7 +247,8 @@ const addProductReview = asyncHandler(async (req, res) => {
     }
     // NoSQL/store-injection fix: rating must be a finite number 1-5,
     // comment must be a plain string (reject {$gt:""} objects).
-    const ratingNum = Number(rating);
+    // Strict: reject booleans (true->1) and "" (->0) that Number() coerces.
+    const ratingNum = toFiniteNumber(rating);
     if (!Number.isFinite(ratingNum) || ratingNum < 1 || ratingNum > 5) {
       return res.status(400).json({ error: "Rating must be 1-5" });
     }
@@ -301,12 +343,12 @@ const filterProducts = asyncHandler(async (req, res) => {
       if (radio.length !== 2) {
         return res.status(400).json({ error: "Invalid price filter" });
       }
-      const min = Number(radio[0]);
-      const max = Number(radio[1]);
+      const min = toFiniteNumber(radio[0]);
+      const max = toFiniteNumber(radio[1]);
       if (!Number.isFinite(min) || !Number.isFinite(max)) {
         return res.status(400).json({ error: "Invalid price filter" });
       }
-      args.price = { $gte: min, $lte: max };
+      args.price = mongoose.trusted({ $gte: min, $lte: max });
     }
 
     const products = await Product.find(args);
