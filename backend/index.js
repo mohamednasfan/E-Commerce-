@@ -18,9 +18,46 @@ const port = process.env.PORT || 5000;
 connectDB();
 
 const app = express();
+app.disable("x-powered-by");
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// XSS/containment hardening (helmet-equivalent, zero-dependency):
+// Even though the React frontend escapes via JSX, stored payloads could
+// execute in other consumers. CSP + nosniff + frame guard limits impact.
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=()"
+  );
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'self'",
+      "form-action 'self'",
+      "img-src 'self' data: https:",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline' https:",
+      "font-src 'self' https: data:",
+      "connect-src 'self' https:",
+    ].join("; ")
+  );
+  next();
+});
+
+// Defense-in-depth: use simple query parser so ?keyword[$gt]= stays a
+// literal string instead of becoming {keyword:{$gt:""}} via qs nesting.
+app.set("query parser", "simple");
+
+app.use(express.json({ limit: "100kb" }));
+// NoSQL hardening: extended:false avoids qs nesting (field[$ne]=) in urlencoded bodies.
+// JSON bodies are still strictly type-checked in controllers.
+app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 
 app.use("/api/users", userRoutes);
