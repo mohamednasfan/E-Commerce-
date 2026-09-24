@@ -3,7 +3,7 @@ import path from "path";
 import express from "express";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
-import helmet from "helmet";S
+import helmet from "helmet";
 
 // Utiles
 import connectDB from "./config/db.js";
