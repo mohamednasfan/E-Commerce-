@@ -63,7 +63,7 @@ app.use((req, res, next) => {
       "object-src 'none'",
       "frame-ancestors 'self'",
       "form-action 'self'",
-      "img-src 'self' data: https:",
+      "img-src 'self' https:",
       "script-src 'self'",
       "style-src 'self' 'unsafe-inline' https:",
       "font-src 'self' https: data:",
