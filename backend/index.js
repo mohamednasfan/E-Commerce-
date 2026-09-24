@@ -24,7 +24,9 @@ const app = express();
 app.set("query parser", "simple");
 
 app.use(express.json({ limit: "100kb" }));
-app.use(express.urlencoded({ extended: true }));
+// NoSQL hardening: extended:false avoids qs nesting (field[$ne]=) in urlencoded bodies.
+// JSON bodies are still strictly type-checked in controllers.
+app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 
 app.use("/api/users", userRoutes);

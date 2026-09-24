@@ -1,5 +1,6 @@
 import Category from "../models/categoryModel.js";
 import asyncHandler from "../middlewares/asyncHandler.js";
+import { isValidObjectId } from "mongoose";
 
 const createCategory = asyncHandler(async (req, res) => {
   try {
@@ -34,7 +35,11 @@ const updateCategory = asyncHandler(async (req, res) => {
     const { name } = body;
     const { categoryId } = req.params;
 
-    if (typeof categoryId !== "string" || categoryId.trim() === "") {
+    if (
+      typeof categoryId !== "string" ||
+      categoryId.trim() === "" ||
+      !isValidObjectId(categoryId)
+    ) {
       return res.status(400).json({ error: "Invalid category id" });
     }
     // NoSQL fix: name must be a plain string, never an operator object.
@@ -60,7 +65,16 @@ const updateCategory = asyncHandler(async (req, res) => {
 
 const removeCategory = asyncHandler(async (req, res) => {
   try {
-    const removed = await Category.findByIdAndRemove(req.params.categoryId);
+    if (
+      typeof req.params.categoryId !== "string" ||
+      !isValidObjectId(req.params.categoryId)
+    ) {
+      return res.status(400).json({ error: "Invalid category id" });
+    }
+    const removed = await Category.findByIdAndDelete(req.params.categoryId);
+    if (!removed) {
+      return res.status(404).json({ error: "Category not found" });
+    }
     res.json(removed);
   } catch (error) {
     console.error(error);
@@ -80,7 +94,13 @@ const listCategory = asyncHandler(async (req, res) => {
 
 const readCategory = asyncHandler(async (req, res) => {
   try {
+    if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid category id" });
+    }
     const category = await Category.findOne({ _id: req.params.id });
+    if (!category) {
+      return res.status(404).json({ error: "Category not found" });
+    }
     res.json(category);
   } catch (error) {
     console.log(error);

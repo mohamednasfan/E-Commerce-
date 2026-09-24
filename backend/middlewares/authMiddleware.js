@@ -1,11 +1,13 @@
 import jwt from "jsonwebtoken";
 import User from "../models/userModel.js";
 import asyncHandler from "./asyncHandler.js";
+import { isValidObjectId } from "mongoose";
 
 const authenticate = asyncHandler(async (req, res, next) => {
   const token = req.cookies?.jwt;
 
-  if (!token) {
+  // NoSQL hardening: cookieParser should give a string; reject objects like { $ne: null }.
+  if (typeof token !== "string" || token.trim() === "") {
     res.status(401);
     throw new Error("Not authorized, no token.");
   }
@@ -19,9 +21,14 @@ const authenticate = asyncHandler(async (req, res, next) => {
 
     const decoded = jwt.verify(token, secret, { algorithms: ["HS256"] });
 
-    if (!decoded || !decoded.userId) {
+    // NoSQL hardening: userId from JWT payload must be a plain valid ObjectId string.
+    if (
+      !decoded ||
+      typeof decoded.userId !== "string" ||
+      !isValidObjectId(decoded.userId)
+    ) {
       res.status(401);
-      throw new Error("Not authorized, invalid token payload.");
+      throw new Error("Not authorized, token failed.");
     }
 
     const user = await User.findById(decoded.userId).select("-password");

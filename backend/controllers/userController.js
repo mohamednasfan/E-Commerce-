@@ -2,6 +2,7 @@ import User from "../models/userModel.js";
 import asyncHandler from "../middlewares/asyncHandler.js";
 import bcrypt from "bcryptjs";
 import createToken from "../utils/createToken.js";
+import { isValidObjectId } from "mongoose";
 import { OAuth2Client } from "google-auth-library";
 import crypto from "crypto";
 
@@ -18,19 +19,31 @@ const createUser = asyncHandler(async (req, res) => {
   // NoSQL injection fix: reject non-string objects like {"$ne": null}
   // before they reach User.findOne(). Previous `if (!email)` was truthy
   // for objects and the missing `return` continued creation after 400.
-  if (
-    typeof username !== "string" ||
-    typeof email !== "string" ||
-    typeof password !== "string" ||
-    username.trim() === "" ||
-    email.trim() === "" ||
-    password === ""
-  ) {
-    return res.status(400).json({ message: "Please fill all the inputs." });
+  // Plus strength validation: username 3-50, email format, password 6-72 (bcrypt limit).
+  if (typeof username !== "string") {
+    return res.status(400).json({ message: "Invalid username" });
+  }
+  const normalizedUsername = username.trim().slice(0, 50);
+  if (normalizedUsername.length < 3 || normalizedUsername.length > 50) {
+    return res.status(400).json({ message: "Username must be 3-50 characters" });
   }
 
-  const normalizedEmail = email.trim();
-  const normalizedUsername = username.trim();
+  if (typeof email !== "string") {
+    return res.status(400).json({ message: "Invalid email" });
+  }
+  const normalizedEmail = email.trim().toLowerCase().slice(0, 254);
+  if (
+    normalizedEmail.length < 5 ||
+    normalizedEmail.length > 254 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)
+  ) {
+    return res.status(400).json({ message: "Invalid email" });
+  }
+
+  if (typeof password !== "string" || password.length < 6 || password.length > 72) {
+    return res.status(400).json({ message: "Password must be 6-72 characters" });
+  }
+
   const userExists = await User.findOne({ email: normalizedEmail });
   if (!isStrongPassword(password)) {
     return res.status(400).json({
@@ -81,7 +94,9 @@ const loginUser = asyncHandler(async (req, res) => {
     return res.status(401).json({ message: "Invalid email or password" });
   }
 
-  const existingUser = await User.findOne({ email: email.trim() });
+  const existingUser = await User.findOne({
+    email: email.trim().toLowerCase(),
+  });
 
   if (!existingUser) {
     return res.status(401).json({ message: "Invalid email or password" });
@@ -183,7 +198,8 @@ const logoutCurrentUser = asyncHandler(async (req, res) => {
 });
 
 const getAllUsers = asyncHandler(async (req, res) => {
-  const users = await User.find({});
+  // Security fix: never return password hashes to any client, even admins.
+  const users = await User.find({}).select("-password");
   res.json(users);
 });
 
@@ -206,12 +222,43 @@ const updateCurrentUserProfile = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
 
   if (user) {
-    user.username = req.body.username || user.username;
-    user.email = req.body.email || user.email;
+    const body = req.body ?? {};
+    // NoSQL fix + strength: reject operator objects, enforce 3-50 / email format / 6-72.
+    if (body.username !== undefined) {
+      if (typeof body.username !== "string") {
+        return res.status(400).json({ message: "Invalid username" });
+      }
+      const trimmed = body.username.trim().slice(0, 50);
+      if (trimmed.length < 3 || trimmed.length > 50) {
+        return res.status(400).json({ message: "Username must be 3-50 characters" });
+      }
+      user.username = trimmed;
+    }
+    if (body.email !== undefined) {
+      if (typeof body.email !== "string") {
+        return res.status(400).json({ message: "Invalid email" });
+      }
+      const normalized = body.email.trim().toLowerCase().slice(0, 254);
+      if (
+        normalized.length < 5 ||
+        normalized.length > 254 ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)
+      ) {
+        return res.status(400).json({ message: "Invalid email" });
+      }
+      user.email = normalized;
+    }
 
-    if (req.body.password) {
+    if (body.password !== undefined) {
+      if (
+        typeof body.password !== "string" ||
+        body.password.length < 6 ||
+        body.password.length > 72
+      ) {
+        return res.status(400).json({ message: "Password must be 6-72 characters" });
+      }
       const salt = await bcrypt.genSalt(10);
-      const hashedPassword = await bcrypt.hash(req.body.password, salt);
+      const hashedPassword = await bcrypt.hash(body.password, salt);
       user.password = hashedPassword;
     }
 
@@ -230,6 +277,10 @@ const updateCurrentUserProfile = asyncHandler(async (req, res) => {
 });
 
 const deleteUserById = asyncHandler(async (req, res) => {
+  if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
+    res.status(400);
+    throw new Error("Invalid user id");
+  }
   const user = await User.findById(req.params.id);
 
   if (user) {
@@ -247,6 +298,10 @@ const deleteUserById = asyncHandler(async (req, res) => {
 });
 
 const getUserById = asyncHandler(async (req, res) => {
+  if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
+    res.status(400);
+    throw new Error("Invalid user id");
+  }
   const user = await User.findById(req.params.id).select("-password");
 
   if (user) {
@@ -258,12 +313,56 @@ const getUserById = asyncHandler(async (req, res) => {
 });
 
 const updateUserById = asyncHandler(async (req, res) => {
+  if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
+    res.status(400);
+    throw new Error("Invalid user id");
+  }
   const user = await User.findById(req.params.id);
 
   if (user) {
-    user.username = req.body.username || user.username;
-    user.email = req.body.email || user.email;
-    user.isAdmin = Boolean(req.body.isAdmin);
+    const body = req.body ?? {};
+    // NoSQL fix + strength: only plain strings, username 3-50, email format, strict isAdmin.
+    // Rejects {"$ne":null} objects and Boolean({}) -> true coercion.
+    if (body.username !== undefined) {
+      if (typeof body.username !== "string") {
+        res.status(400);
+        throw new Error("Username must be 3-50 characters");
+      }
+      const trimmed = body.username.trim().slice(0, 50);
+      if (trimmed.length < 3 || trimmed.length > 50) {
+        res.status(400);
+        throw new Error("Username must be 3-50 characters");
+      }
+      user.username = trimmed;
+    }
+    if (body.email !== undefined) {
+      if (typeof body.email !== "string") {
+        res.status(400);
+        throw new Error("Invalid email");
+      }
+      const normalized = body.email.trim().toLowerCase().slice(0, 254);
+      if (
+        normalized.length < 5 ||
+        normalized.length > 254 ||
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)
+      ) {
+        res.status(400);
+        throw new Error("Invalid email");
+      }
+      user.email = normalized;
+    }
+    if (body.isAdmin !== undefined) {
+      if (typeof body.isAdmin === "boolean") {
+        user.isAdmin = body.isAdmin;
+      } else if (body.isAdmin === "true" || body.isAdmin === "false") {
+        user.isAdmin = body.isAdmin === "true";
+      } else if (body.isAdmin === 0 || body.isAdmin === 1) {
+        user.isAdmin = body.isAdmin === 1;
+      } else {
+        res.status(400);
+        throw new Error("Invalid isAdmin flag");
+      }
+    }
 
     const updatedUser = await user.save();
 
