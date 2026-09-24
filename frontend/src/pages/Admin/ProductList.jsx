@@ -7,6 +7,7 @@ import {
 import { useFetchCategoriesQuery } from "../../redux/api/categoryApiSlice";
 import { toast } from "react-toastify";
 import AdminMenu from "./AdminMenu";
+import { safeImageUrl } from "../../Utils/safeUrl";
 
 const ProductList = () => {
   const [image, setImage] = useState("");
@@ -76,7 +77,7 @@ const ProductList = () => {
           {imageUrl && (
             <div className="text-center">
               <img
-                src={imageUrl}
+                src={safeImageUrl(imageUrl)}
                 alt="product"
                 className="block mx-auto max-h-[200px]"
               />
