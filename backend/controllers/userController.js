@@ -151,9 +151,13 @@ const loginUser = asyncHandler(async (req, res) => {
 });
 
 const loginWithGoogle = asyncHandler(async (req, res) => {
-  const { credential } = req.body;
+  const { credential } = req.body ?? {};
 
-  if (!credential || !process.env.GOOGLE_CLIENT_ID) {
+  if (
+    typeof credential !== "string" ||
+    credential.trim() === "" ||
+    !process.env.GOOGLE_CLIENT_ID
+  ) {
     res.status(400);
     throw new Error("Google sign-in is not configured.");
   }

@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import moment from "moment";
 import { useAllProductsQuery } from "../../redux/api/productApiSlice";
 import AdminMenu from "./AdminMenu";
+import { safeImageUrl } from "../../Utils/safeUrl";
 
 const AllProducts = () => {
   const { data: products, isLoading, isError } = useAllProductsQuery();
@@ -31,7 +32,7 @@ const AllProducts = () => {
                 >
                   <div className="flex">
                     <img
-                      src={product.image}
+                      src={safeImageUrl(product.image)}
                       alt={product.name}
                       className="w-[10rem] object-cover"
                     />
