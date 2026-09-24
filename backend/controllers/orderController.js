@@ -157,30 +157,38 @@ const findOrderById = async (req, res) => {
   }
 };
 
+
 const markOrderAsPaid = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
 
-    if (order) {
-      order.isPaid = true;
-      order.paidAt = Date.now();
-      order.paymentResult = {
-        id: req.body.id,
-        status: req.body.status,
-        update_time: req.body.update_time,
-        email_address: req.body.payer.email_address,
-      };
-
-      const updateOrder = await order.save();
-      res.status(200).json(updateOrder);
-    } else {
-      res.status(404);
-      throw new Error("Order not found");
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
     }
+
+    // Only the owner of the order can update its payment status
+    if (order.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        message: "Not authorized to update payment status for this order",
+      });
+    }
+
+    order.isPaid = true;
+    order.paidAt = Date.now();
+    order.paymentResult = {
+      id: req.body.id,
+      status: req.body.status,
+      update_time: req.body.update_time,
+      email_address: req.body.payer.email_address,
+    };
+
+    const updatedOrder = await order.save();
+    res.status(200).json(updatedOrder);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 const markOrderAsDelivered = async (req, res) => {
   try {
