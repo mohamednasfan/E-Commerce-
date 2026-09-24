@@ -1,5 +1,6 @@
 import Order from "../models/orderModel.js";
 import Product from "../models/productModel.js";
+import mongoose, { isValidObjectId } from "mongoose";
 
 // Utility Function
 function calcPrices(orderItems) {
@@ -26,36 +27,99 @@ function calcPrices(orderItems) {
   };
 }
 
+// Strict numeric: rejects boolean/object/""/array that Number() coerces (true->1, ""->0).
+const toFiniteNumber = (v) => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : NaN;
+  if (typeof v !== "string") return NaN;
+  const t = v.trim();
+  if (t === "") return NaN;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : NaN;
+};
+
 const createOrder = async (req, res) => {
   try {
-    const { orderItems, shippingAddress, paymentMethod } = req.body;
+    const body =
+      req.body !== null && typeof req.body === "object" ? req.body : {};
+    const { orderItems, shippingAddress, paymentMethod } = body;
 
-    if (orderItems && orderItems.length === 0) {
-      res.status(400);
-      throw new Error("No order items");
+    // NoSQL fix: orderItems must be a non-empty array of { _id: string, qty }.
+    // Without this, {"_id":{"$ne":null}} flows into $in and .map crashes (DoS).
+    if (!Array.isArray(orderItems) || orderItems.length === 0) {
+      return res.status(400).json({ error: "No order items" });
+    }
+    const itemIds = [];
+    for (const item of orderItems) {
+      if (
+        item === null ||
+        typeof item !== "object" ||
+        typeof item._id !== "string" ||
+        !isValidObjectId(item._id)
+      ) {
+        return res.status(400).json({ error: "Invalid order item id" });
+      }
+      const qty = toFiniteNumber(item.qty);
+      if (!Number.isInteger(qty) || qty < 1) {
+        return res.status(400).json({ error: "Invalid order item quantity" });
+      }
+      itemIds.push(item._id);
+    }
+    if (typeof paymentMethod !== "string" || paymentMethod.trim() === "") {
+      return res.status(400).json({ error: "Payment method is required" });
     }
 
     const itemsFromDB = await Product.find({
-      _id: { $in: orderItems.map((x) => x._id) },
+      _id: mongoose.trusted({ $in: itemIds }),
     });
 
-    const dbOrderItems = orderItems.map((itemFromClient) => {
+    const dbOrderItems = [];
+    for (const itemFromClient of orderItems) {
       const matchingItemFromDB = itemsFromDB.find(
         (itemFromDB) => itemFromDB._id.toString() === itemFromClient._id
       );
 
       if (!matchingItemFromDB) {
-        res.status(404);
-        throw new Error(`Product not found: ${itemFromClient._id}`);
+        return res
+          .status(404)
+          .json({ error: `Product not found: ${itemFromClient._id}` });
       }
 
-      return {
-        ...itemFromClient,
+      // Whitelist only: never spread client object (prevents price override
+      // attempts and operator keys like $set from reaching the DB layer).
+      dbOrderItems.push({
+        name:
+          typeof itemFromClient.name === "string"
+            ? itemFromClient.name.slice(0, 200)
+            : matchingItemFromDB.name,
+        qty: toFiniteNumber(itemFromClient.qty),
+        image:
+          typeof itemFromClient.image === "string"
+            ? itemFromClient.image.slice(0, 500)
+            : matchingItemFromDB.image,
         product: itemFromClient._id,
         price: matchingItemFromDB.price,
-        _id: undefined,
-      };
-    });
+      });
+    }
+
+    const address =
+      shippingAddress !== null && typeof shippingAddress === "object"
+        ? shippingAddress
+        : {};
+    const strField = (v) => (typeof v === "string" ? v.slice(0, 200) : "");
+    const cleanAddress = {
+      address: strField(address.address),
+      city: strField(address.city),
+      postalCode: strField(address.postalCode),
+      country: strField(address.country),
+    };
+    if (
+      !cleanAddress.address ||
+      !cleanAddress.city ||
+      !cleanAddress.postalCode ||
+      !cleanAddress.country
+    ) {
+      return res.status(400).json({ error: "Shipping address is required" });
+    }
 
     const { itemsPrice, taxPrice, shippingPrice, totalPrice } =
       calcPrices(dbOrderItems);
@@ -63,8 +127,8 @@ const createOrder = async (req, res) => {
     const order = new Order({
       orderItems: dbOrderItems,
       user: req.user._id,
-      shippingAddress,
-      paymentMethod,
+      shippingAddress: cleanAddress,
+      paymentMethod: paymentMethod.trim().slice(0, 50),
       itemsPrice,
       taxPrice,
       shippingPrice,
@@ -141,6 +205,9 @@ const calcualteTotalSalesByDate = async (req, res) => {
 
 const findOrderById = async (req, res) => {
   try {
+    if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid order id" });
+    }
     const order = await Order.findById(req.params.id).populate(
       "user",
       "username email"
@@ -159,16 +226,25 @@ const findOrderById = async (req, res) => {
 
 const markOrderAsPaid = async (req, res) => {
   try {
+    if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid order id" });
+    }
+    const body =
+      req.body !== null && typeof req.body === "object" ? req.body : {};
+    const payer =
+      body.payer !== null && typeof body.payer === "object" ? body.payer : {};
+    const asString = (v, max = 200) =>
+      typeof v === "string" ? v.slice(0, max) : undefined;
     const order = await Order.findById(req.params.id);
 
     if (order) {
       order.isPaid = true;
       order.paidAt = Date.now();
       order.paymentResult = {
-        id: req.body.id,
-        status: req.body.status,
-        update_time: req.body.update_time,
-        email_address: req.body.payer.email_address,
+        id: asString(body.id),
+        status: asString(body.status),
+        update_time: asString(body.update_time),
+        email_address: asString(payer.email_address),
       };
 
       const updateOrder = await order.save();
@@ -184,6 +260,9 @@ const markOrderAsPaid = async (req, res) => {
 
 const markOrderAsDelivered = async (req, res) => {
   try {
+    if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
+      return res.status(400).json({ error: "Invalid order id" });
+    }
     const order = await Order.findById(req.params.id);
 
     if (order) {
