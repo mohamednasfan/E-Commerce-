@@ -245,40 +245,53 @@ const findOrderById = async (req, res) => {
   }
 };
 
+
 const markOrderAsPaid = async (req, res) => {
   try {
     if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
       return res.status(400).json({ error: "Invalid order id" });
     }
+
     const body =
       req.body !== null && typeof req.body === "object" ? req.body : {};
+
     const payer =
       body.payer !== null && typeof body.payer === "object" ? body.payer : {};
+
     // XSS fix: strip tags from PayPal-returned strings before storing.
     const asString = (v, max = 200) =>
       typeof v === "string" ? sanitizeText(v, max) || undefined : undefined;
+
     const order = await Order.findById(req.params.id);
 
-    if (order) {
-      order.isPaid = true;
-      order.paidAt = Date.now();
-      order.paymentResult = {
-        id: asString(body.id),
-        status: asString(body.status),
-        update_time: asString(body.update_time),
-        email_address: asString(payer.email_address),
-      };
-
-      const updateOrder = await order.save();
-      res.status(200).json(updateOrder);
-    } else {
-      res.status(404);
-      throw new Error("Order not found");
+    if (!order) {
+      return res.status(404).json({ message: "Order not found" });
     }
+
+    // V3 fix: only the owner can update this order's payment status
+    if (order.user.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        message: "Not authorized to update payment status for this order",
+      });
+    }
+
+    order.isPaid = true;
+    order.paidAt = Date.now();
+
+    order.paymentResult = {
+      id: asString(body.id),
+      status: asString(body.status),
+      update_time: asString(body.update_time),
+      email_address: asString(payer.email_address),
+    };
+
+    const updatedOrder = await order.save();
+    res.status(200).json(updatedOrder);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 };
+
 
 const markOrderAsDelivered = async (req, res) => {
   try {
