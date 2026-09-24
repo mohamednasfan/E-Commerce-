@@ -19,7 +19,11 @@ connectDB();
 
 const app = express();
 
-app.use(express.json());
+// Defense-in-depth: use simple query parser so ?keyword[$gt]= stays a
+// literal string instead of becoming {keyword:{$gt:""}} via qs nesting.
+app.set("query parser", "simple");
+
+app.use(express.json({ limit: "100kb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
