@@ -1,6 +1,7 @@
 import Category from "../models/categoryModel.js";
 import asyncHandler from "../middlewares/asyncHandler.js";
 import { isValidObjectId } from "mongoose";
+import { sanitizeText, containsXss } from "../utils/sanitize.js";
 
 const createCategory = asyncHandler(async (req, res) => {
   try {
@@ -12,8 +13,15 @@ const createCategory = asyncHandler(async (req, res) => {
     if (typeof name !== "string" || name.trim() === "") {
       return res.status(400).json({ error: "Name is required" });
     }
+    if (containsXss(name)) {
+      return res.status(400).json({ error: "Invalid category name" });
+    }
 
-    const trimmedName = name.trim().slice(0, 32);
+    // XSS fix: strip tags, remove < > so HTML can never be stored.
+    const trimmedName = sanitizeText(name, 32);
+    if (!trimmedName) {
+      return res.status(400).json({ error: "Invalid category name" });
+    }
     const existingCategory = await Category.findOne({ name: trimmedName });
 
     if (existingCategory) {
@@ -46,6 +54,9 @@ const updateCategory = asyncHandler(async (req, res) => {
     if (typeof name !== "string" || name.trim() === "") {
       return res.status(400).json({ error: "Name is required" });
     }
+    if (containsXss(name)) {
+      return res.status(400).json({ error: "Invalid category name" });
+    }
 
     const category = await Category.findOne({ _id: categoryId });
 
@@ -53,7 +64,12 @@ const updateCategory = asyncHandler(async (req, res) => {
       return res.status(404).json({ error: "Category not found" });
     }
 
-    category.name = name.trim().slice(0, 32);
+    // XSS fix: strip tags, remove < > so HTML can never be stored.
+    const cleanName = sanitizeText(name, 32);
+    if (!cleanName) {
+      return res.status(400).json({ error: "Invalid category name" });
+    }
+    category.name = cleanName;
 
     const updatedCategory = await category.save();
     res.json(updatedCategory);
