@@ -4,18 +4,36 @@ import bcrypt from "bcryptjs";
 import createToken from "../utils/createToken.js";
 
 const createUser = asyncHandler(async (req, res) => {
-  const { username, email, password } = req.body;
+  const { username, email, password } = req.body ?? {};
 
-  if (!username || !email || !password) {
-    throw new Error("Please fill all the inputs.");
+  // NoSQL injection fix: reject non-string objects like {"$ne": null}
+  // before they reach User.findOne(). Previous `if (!email)` was truthy
+  // for objects and the missing `return` continued creation after 400.
+  if (
+    typeof username !== "string" ||
+    typeof email !== "string" ||
+    typeof password !== "string" ||
+    username.trim() === "" ||
+    email.trim() === "" ||
+    password === ""
+  ) {
+    return res.status(400).json({ message: "Please fill all the inputs." });
   }
 
-  const userExists = await User.findOne({ email });
-  if (userExists) res.status(400).send("User already exists");
+  const normalizedEmail = email.trim();
+  const normalizedUsername = username.trim();
+  const userExists = await User.findOne({ email: normalizedEmail });
+  if (userExists) {
+    return res.status(400).json({ message: "User already exists" });
+  }
 
   const salt = await bcrypt.genSalt(10);
   const hashedPassword = await bcrypt.hash(password, salt);
-  const newUser = new User({ username, email, password: hashedPassword });
+  const newUser = new User({
+    username: normalizedUsername,
+    email: normalizedEmail,
+    password: hashedPassword,
+  });
 
   try {
     await newUser.save();
@@ -34,12 +52,21 @@ const createUser = asyncHandler(async (req, res) => {
 });
 
 const loginUser = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password } = req.body ?? {};
 
-  console.log(email);
-  console.log(password);
+  // NoSQL injection fix: express.json() allows {"email":{"$ne":null}}.
+  // Only accept plain non-empty strings so objects never reach findOne().
+  // Uses direct return (not throw) so status is correct regardless of handler.
+  if (
+    typeof email !== "string" ||
+    typeof password !== "string" ||
+    email.trim() === "" ||
+    password === ""
+  ) {
+    return res.status(401).json({ message: "Invalid email or password" });
+  }
 
-  const existingUser = await User.findOne({ email });
+  const existingUser = await User.findOne({ email: email.trim() });
 
   if (existingUser) {
     const isPasswordValid = await bcrypt.compare(
@@ -59,6 +86,10 @@ const loginUser = asyncHandler(async (req, res) => {
       return;
     }
   }
+
+  // Generic response for both unknown email and wrong password
+  // to avoid user-enumeration via timing/response differences.
+  return res.status(401).json({ message: "Invalid email or password" });
 });
 
 const logoutCurrentUser = asyncHandler(async (req, res) => {
