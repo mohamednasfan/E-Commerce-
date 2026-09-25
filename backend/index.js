@@ -3,6 +3,7 @@ import path from "path";
 import express from "express";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
+import helmet from "helmet";
 
 // Utiles
 import connectDB from "./config/db.js";
@@ -11,15 +12,37 @@ import categoryRoutes from "./routes/categoryRoutes.js";
 import productRoutes from "./routes/productRoutes.js";
 import uploadRoutes from "./routes/uploadRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
+import { notFound, errorHandler } from "./middlewares/errorHandler.js";
 
 dotenv.config();
 const port = process.env.PORT || 5000;
 
 connectDB();
-
+//Missing Security Header= Sets security headers to protect the app from common web attacks.
 const app = express();
 app.disable("x-powered-by");
 
+app.use(
+  helmet({
+    frameguard: { action: "deny" },
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: null,
+      },
+    },
+    referrerPolicy: { policy: "no-referrer" },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+    },
+  })
+);
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 // XSS/containment hardening (helmet-equivalent, zero-dependency):
 // Even though the React frontend escapes via JSX, stored payloads could
 // execute in other consumers. CSP + nosniff + frame guard limits impact.
@@ -72,5 +95,9 @@ app.get("/api/config/paypal", (req, res) => {
 
 const __dirname = path.resolve();
 app.use("/uploads", express.static(path.join(__dirname + "/uploads")));
+
+// fix sensitive error disclosure: "centralized error handler prevents unhandled server errors from leaking stack traces"
+app.use(notFound);
+app.use(errorHandler);
 
 app.listen(port, () => console.log(`Server running on port: ${port}`));

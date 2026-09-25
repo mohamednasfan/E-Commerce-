@@ -2,6 +2,7 @@ import Order from "../models/orderModel.js";
 import Product from "../models/productModel.js";
 import mongoose, { isValidObjectId } from "mongoose";
 import { sanitizeText, sanitizeImageUrl, containsXss } from "../utils/sanitize.js";
+import asyncHandler from "../middlewares/asyncHandler.js";
 
 // Utility Function
 function calcPrices(orderItems) {
@@ -159,48 +160,58 @@ const createOrder = async (req, res) => {
     const createdOrder = await order.save();
     res.status(201).json(createdOrder);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    // fix sensitive error disclosure: "generic 500 error response instead of leaking order creation exception details"
+    res.status(500).json({ error: "Failed to create order" });
   }
 };
 
-const getAllOrders = async (req, res) => {
+const getAllOrders = asyncHandler(async (req, res) => {
   try {
     const orders = await Order.find({}).populate("user", "id username");
     res.json(orders);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    // fix sensitive error disclosure: "generic error response for order listing failures"
+    res.status(500).json({ error: "Failed to fetch orders" });
   }
-};
+});
 
-const getUserOrders = async (req, res) => {
+const getUserOrders = asyncHandler(async (req, res) => {
   try {
     const orders = await Order.find({ user: req.user._id });
     res.json(orders);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    // fix sensitive error disclosure: "generic error response for user orders query failures"
+    res.status(500).json({ error: "Failed to fetch user orders" });
   }
-};
+});
 
-const countTotalOrders = async (req, res) => {
+const countTotalOrders = asyncHandler(async (req, res) => {
   try {
     const totalOrders = await Order.countDocuments();
     res.json({ totalOrders });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    // fix sensitive error disclosure: "generic error response for total order count failures"
+    res.status(500).json({ error: "Failed to count total orders" });
   }
-};
+});
 
-const calculateTotalSales = async (req, res) => {
+const calculateTotalSales = asyncHandler(async (req, res) => {
   try {
     const orders = await Order.find();
     const totalSales = orders.reduce((sum, order) => sum + order.totalPrice, 0);
     res.json({ totalSales });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    // fix sensitive error disclosure: "generic error response for total sales calculation failures"
+    res.status(500).json({ error: "Failed to calculate total sales" });
   }
-};
+});
 
-const calcualteTotalSalesByDate = async (req, res) => {
+const calcualteTotalSalesByDate = asyncHandler(async (req, res) => {
   try {
     const salesByDate = await Order.aggregate([
       {
@@ -220,11 +231,13 @@ const calcualteTotalSalesByDate = async (req, res) => {
 
     res.json(salesByDate);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    // fix sensitive error disclosure: "generic error response for sales aggregation by date failures"
+    res.status(500).json({ error: "Failed to calculate sales by date" });
   }
-};
+});
 
-const findOrderById = async (req, res) => {
+const findOrderById = asyncHandler(async (req, res) => {
   try {
     if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
       return res.status(400).json({ error: "Invalid order id" });
@@ -237,15 +250,16 @@ const findOrderById = async (req, res) => {
     if (order) {
       res.json(order);
     } else {
-      res.status(404);
-      throw new Error("Order not found");
+      res.status(404).json({ error: "Order not found" });
     }
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    // fix sensitive error disclosure: "generic error response for find order query failures"
+    res.status(500).json({ error: "Failed to fetch order" });
   }
-};
+});
 
-const markOrderAsPaid = async (req, res) => {
+const markOrderAsPaid = asyncHandler(async (req, res) => {
   try {
     if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
       return res.status(400).json({ error: "Invalid order id" });
@@ -254,7 +268,6 @@ const markOrderAsPaid = async (req, res) => {
       req.body !== null && typeof req.body === "object" ? req.body : {};
     const payer =
       body.payer !== null && typeof body.payer === "object" ? body.payer : {};
-    // XSS fix: strip tags from PayPal-returned strings before storing.
     const asString = (v, max = 200) =>
       typeof v === "string" ? sanitizeText(v, max) || undefined : undefined;
     const order = await Order.findById(req.params.id);
@@ -272,15 +285,16 @@ const markOrderAsPaid = async (req, res) => {
       const updateOrder = await order.save();
       res.status(200).json(updateOrder);
     } else {
-      res.status(404);
-      throw new Error("Order not found");
+      res.status(404).json({ error: "Order not found" });
     }
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    // fix sensitive error disclosure: "generic error response for mark paid update failures"
+    res.status(500).json({ error: "Failed to update payment status" });
   }
-};
+});
 
-const markOrderAsDelivered = async (req, res) => {
+const markOrderAsDelivered = asyncHandler(async (req, res) => {
   try {
     if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
       return res.status(400).json({ error: "Invalid order id" });
@@ -294,13 +308,14 @@ const markOrderAsDelivered = async (req, res) => {
       const updatedOrder = await order.save();
       res.json(updatedOrder);
     } else {
-      res.status(404);
-      throw new Error("Order not found");
+      res.status(404).json({ error: "Order not found" });
     }
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error(error);
+    // fix sensitive error disclosure: "generic error response for mark delivered update failures"
+    res.status(500).json({ error: "Failed to update delivery status" });
   }
-};
+});
 
 export {
   createOrder,

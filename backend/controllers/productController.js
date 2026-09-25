@@ -82,7 +82,8 @@ const addProduct = asyncHandler(async (req, res) => {
     res.json(product);
   } catch (error) {
     console.error(error);
-    res.status(400).json(error.message);
+    // fix sensitive error disclosure
+    res.status(500).json({ error: "Failed to create product" });
   }
 });
 
@@ -152,7 +153,8 @@ const updateProductDetails = asyncHandler(async (req, res) => {
     res.json(product);
   } catch (error) {
     console.error(error);
-    res.status(400).json(error.message);
+    // fix sensitive error disclosure
+    res.status(500).json({ error: "Failed to update product" });
   }
 });
 
@@ -168,7 +170,8 @@ const removeProduct = asyncHandler(async (req, res) => {
     res.json(product);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Server error" });
+    // fix sensitive error disclosure
+    res.status(500).json({ error: "Failed to remove product" });
   }
 });
 
@@ -176,26 +179,15 @@ const fetchProducts = asyncHandler(async (req, res) => {
   try {
     const pageSize = 6;
 
-    // NoSQL injection fix: strict whitelist of query keys.
-    // With `simple` query parser, ?keyword[$ne]=null parses as
-    // { "keyword[$ne]": "null" } so req.query.keyword is undefined and
-    // would fall through to find({}) dumping all products.
-    // Reject any key other than plain `keyword`.
     const queryKeys = Object.keys(req.query ?? {});
     if (queryKeys.some((k) => k !== "keyword")) {
       return res.status(400).json({ error: "Invalid search keyword" });
     }
-    // Backstop for encoded operator keys regardless of parser
-    // (e.g. ?keyword%5B$ne%5D=null). Allows literal `$` in values
-    // like ?keyword=$20 which is safely escaped below.
     const rawUrl = req.originalUrl || "";
     if (/keyword\s*(%5b|\[)/i.test(rawUrl)) {
       return res.status(400).json({ error: "Invalid search keyword" });
     }
 
-    // NoSQL injection fix: only accept keyword as a plain string.
-    // Express extended query parser turns ?keyword[$gt]= into an object,
-    // which must be rejected instead of passed to $regex.
     const rawKeyword = req.query.keyword;
     if (rawKeyword !== undefined && typeof rawKeyword !== "string") {
       return res.status(400).json({ error: "Invalid search keyword" });
@@ -203,17 +195,12 @@ const fetchProducts = asyncHandler(async (req, res) => {
 
     let keyword = {};
     if (typeof rawKeyword === "string" && rawKeyword.trim() !== "") {
-      // Cap length (ReDoS mitigation) and escape regex metacharacters
-      // so user input is matched literally, not as a regex pattern.
       const safeKeyword = rawKeyword
         .trim()
         .slice(0, 100)
         .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
       if (safeKeyword) {
-        // sanitizeFilter=true would otherwise wrap our own $regex in $eq
-        // causing CastError. safeKeyword is escaped + capped above, so
-        // mark only this server-built operator object as trusted.
         keyword = {
           name: mongoose.trusted({
             $regex: safeKeyword,
@@ -234,7 +221,8 @@ const fetchProducts = asyncHandler(async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Server Error" });
+    // fix sensitive error disclosure
+    res.status(500).json({ error: "Failed to fetch products" });
   }
 });
 
@@ -247,11 +235,11 @@ const fetchProductById = asyncHandler(async (req, res) => {
     if (product) {
       return res.json(product);
     } else {
-      res.status(404);
-      throw new Error("Product not found");
+      return res.status(404).json({ error: "Product not found" });
     }
   } catch (error) {
     console.error(error);
+    // fix sensitive error disclosure
     res.status(404).json({ error: "Product not found" });
   }
 });
@@ -266,7 +254,8 @@ const fetchAllProducts = asyncHandler(async (req, res) => {
     res.json(products);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Server Error" });
+    // fix sensitive error disclosure
+    res.status(500).json({ error: "Failed to fetch products" });
   }
 });
 
@@ -278,9 +267,6 @@ const addProductReview = asyncHandler(async (req, res) => {
     if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
       return res.status(400).json({ error: "Invalid product id" });
     }
-    // NoSQL/store-injection fix: rating must be a finite number 1-5,
-    // comment must be a plain string (reject {$gt:""} objects).
-    // Strict: reject booleans (true->1) and "" (->0) that Number() coerces.
     const ratingNum = toFiniteNumber(rating);
     if (!Number.isFinite(ratingNum) || ratingNum < 1 || ratingNum > 5) {
       return res.status(400).json({ error: "Rating must be 1-5" });
@@ -288,9 +274,6 @@ const addProductReview = asyncHandler(async (req, res) => {
     if (typeof comment !== "string" || comment.trim() === "") {
       return res.status(400).json({ error: "Comment is required" });
     }
-    // Stored-XSS fix: reject HTML / script payloads outright (400) instead
-    // of storing them. e.g. "<script>alert('XSS-review')</script>" must not
-    // return 201. sanitizeComment below remains as defense-in-depth.
     if (containsXss(comment)) {
       return res.status(400).json({ error: "Invalid comment" });
     }
@@ -305,12 +288,9 @@ const addProductReview = asyncHandler(async (req, res) => {
       );
 
       if (alreadyReviewed) {
-        res.status(400);
-        throw new Error("Product already reviewed");
+        return res.status(400).json({ error: "Product already reviewed" });
       }
 
-      // XSS fix: strip HTML tags from comment; sanitize stored username too
-      // (protects old DB rows created before sanitization).
       const cleanComment = sanitizeComment(comment, 1000);
       if (!cleanComment) {
         return res.status(400).json({ error: "Invalid comment" });
@@ -333,33 +313,23 @@ const addProductReview = asyncHandler(async (req, res) => {
       await product.save();
       res.status(201).json({ message: "Review added" });
     } else {
-      res.status(404);
-      throw new Error("Product not found");
+      res.status(404).json({ error: "Product not found" });
     }
   } catch (error) {
     console.error(error);
-    res.status(400).json(error.message);
+    // fix sensitive error disclosure
+    res.status(500).json({ error: "Failed to add product review" });
   }
 });
 
 const fetchTopProducts = asyncHandler(async (req, res) => {
-  try {
-    const products = await Product.find({}).sort({ rating: -1 }).limit(4);
-    res.json(products);
-  } catch (error) {
-    console.error(error);
-    res.status(400).json(error.message);
-  }
+  const products = await Product.find({}).sort({ rating: -1 }).limit(4);
+  res.json(products);
 });
 
 const fetchNewProducts = asyncHandler(async (req, res) => {
-  try {
-    const products = await Product.find().sort({ _id: -1 }).limit(5);
-    res.json(products);
-  } catch (error) {
-    console.error(error);
-    res.status(400).json(error.message);
-  }
+  const products = await Product.find().sort({ _id: -1 }).limit(5);
+  res.json(products);
 });
 
 const filterProducts = asyncHandler(async (req, res) => {

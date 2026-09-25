@@ -1,9 +1,10 @@
 import { isValidObjectId } from "mongoose";
+import AppError from "../utils/AppError.js";
 
 function checkId(req, res, next) {
-  if (typeof req.params.id !== "string" || !isValidObjectId(req.params.id)) {
-    res.status(404);
-    throw new Error("Invalid Object Id");
+  // fix sensitive error disclosure: "validates Object ID format upfront to prevent database CastError stack trace leakage"
+  if (!isValidObjectId(req.params.id)) {
+    return next(new AppError("Invalid ID format", 400));
   }
   next();
 }
