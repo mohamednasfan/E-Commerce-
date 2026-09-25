@@ -59,6 +59,7 @@ export const notFound = (req, res, next) => {
   next(new AppError("Resource not found", 404));
 };
 
+// fix sensitive error disclosure: "sanitizes error details and hides stack traces and database internal messages from client responses"
 export const errorHandler = (err, req, res, next) => {
   const mapped = mapKnownLibraryError(err) || err;
 

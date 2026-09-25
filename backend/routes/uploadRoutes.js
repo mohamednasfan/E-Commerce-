@@ -35,6 +35,7 @@ const uploadSingleImage = upload.single("image");
 router.post("/", (req, res, next) => {
   uploadSingleImage(req, res, (err) => {
     if (err) {
+      // fix sensitive error disclosure: pass error to error handler middleware
       res.status(400);
       return next(err);
     } else if (req.file) {

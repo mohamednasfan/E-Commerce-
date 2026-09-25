@@ -1,4 +1,4 @@
-//SED= Wraps async route handlers so thrown errors are passed to Express's error middleware.
+// fix sensitive error disclosure: "forwards async route errors to central error handler instead of exposing raw error messages"
 const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch(next);
 };

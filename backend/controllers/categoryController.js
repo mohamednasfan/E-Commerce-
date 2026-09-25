@@ -22,19 +22,13 @@ const createCategory = asyncHandler(async (req, res) => {
     if (!trimmedName) {
       return res.status(400).json({ error: "Invalid category name" });
     }
-    const existingCategory = await Category.findOne({ name: trimmedName });
-
-  const existingCategory = await Category.findOne({ name });
-
     const category = await new Category({ name: trimmedName }).save();
     res.json(category);
   } catch (error) {
-    console.log(error);
-    return res.status(400).json(error);
+    console.error(error);
+    // fix sensitive error disclosure: "generic 500 error response instead of leaking raw database error trace"
+    return res.status(500).json({ error: "Failed to create category" });
   }
-
-  const category = await new Category({ name }).save();
-  res.json(category);
 });
 
 const updateCategory = asyncHandler(async (req, res) => {
@@ -72,8 +66,13 @@ const updateCategory = asyncHandler(async (req, res) => {
     }
     category.name = cleanName;
 
-  const updatedCategory = await category.save();
-  res.json(updatedCategory);
+    const updatedCategory = await category.save();
+    res.json(updatedCategory);
+  } catch (error) {
+    console.error(error);
+    // fix sensitive error disclosure: "generic 500 error response instead of leaking database update details"
+    res.status(500).json({ error: "Failed to update category" });
+  }
 });
 
 const removeCategory = asyncHandler(async (req, res) => {
@@ -91,13 +90,20 @@ const removeCategory = asyncHandler(async (req, res) => {
     res.json(removed);
   } catch (error) {
     console.error(error);
+    // fix sensitive error disclosure: "generic internal server error response"
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
 const listCategory = asyncHandler(async (req, res) => {
-  const all = await Category.find({});
-  res.json(all);
+  try {
+    const all = await Category.find({});
+    res.json(all);
+  } catch (error) {
+    console.error(error);
+    // fix sensitive error disclosure: "generic error response for list category failures"
+    res.status(500).json({ error: "Failed to fetch categories" });
+  }
 });
 
 const readCategory = asyncHandler(async (req, res) => {
@@ -111,8 +117,9 @@ const readCategory = asyncHandler(async (req, res) => {
     }
     res.json(category);
   } catch (error) {
-    console.log(error);
-    return res.status(400).json(error.message);
+    console.error(error);
+    // fix sensitive error disclosure: "generic error response for read category failures"
+    return res.status(500).json({ error: "Failed to fetch category" });
   }
 });
 
