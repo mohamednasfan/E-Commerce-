@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 
-// Utiles
+// Utils
 import connectDB from "./config/db.js";
 import userRoutes from "./routes/userRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
@@ -18,34 +18,14 @@ dotenv.config();
 const port = process.env.PORT || 5000;
 
 connectDB();
-//Missing Security Header= Sets security headers to protect the app from common web attacks.
+
 const app = express();
 app.disable("x-powered-by");
 
-app.use(
-  helmet({
-    frameguard: { action: "deny" },
-    contentSecurityPolicy: {
-      useDefaults: true,
-      directives: {
-        frameAncestors: ["'none'"],
-        objectSrc: ["'none'"],
-        upgradeInsecureRequests: null,
-      },
-    },
-    referrerPolicy: { policy: "no-referrer" },
-    hsts: {
-      maxAge: 31536000,
-      includeSubDomains: true,
-    },
-  })
-);
-
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-// XSS/containment hardening (helmet-equivalent, zero-dependency):
-// Even though the React frontend escapes via JSX, stored payloads could
-// execute in other consumers. CSP + nosniff + frame guard limits impact.
+// ============================================================
+// 1) SHARED XSS / CSP HARDENING MIDDLEWARE (Teammate's part)
+// Runs FIRST so Helmet (below) can override conflicting headers.
+// ============================================================
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
@@ -73,16 +53,42 @@ app.use((req, res, next) => {
   next();
 });
 
-// Defense-in-depth: use simple query parser so ?keyword[$gt]= stays a
-// literal string instead of becoming {keyword:{$gt:""}} via qs nesting.
+// ============================================================
+// 2) MISSING SECURITY HEADERS (Your part)
+// Helmet runs AFTER the shared middleware so its values take
+// precedence for X-Frame-Options and Referrer-Policy.
+// ============================================================
+app.use(
+  helmet({
+    frameguard: { action: "deny" },
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: null,
+      },
+    },
+    referrerPolicy: { policy: "no-referrer" },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+    },
+  })
+);
+
+// ============================================================
+// Body parsers + query parser hardening
+// ============================================================
 app.set("query parser", "simple");
 
 app.use(express.json({ limit: "100kb" }));
-// NoSQL hardening: extended:false avoids qs nesting (field[$ne]=) in urlencoded bodies.
-// JSON bodies are still strictly type-checked in controllers.
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 
+// ============================================================
+// Routes
+// ============================================================
 app.use("/api/users", userRoutes);
 app.use("/api/category", categoryRoutes);
 app.use("/api/products", productRoutes);
@@ -96,7 +102,9 @@ app.get("/api/config/paypal", (req, res) => {
 const __dirname = path.resolve();
 app.use("/uploads", express.static(path.join(__dirname + "/uploads")));
 
-// fix sensitive error disclosure: "centralized error handler prevents unhandled server errors from leaking stack traces"
+// ============================================================
+// Sensitive Error Disclosure fix — centralized error handling
+// ============================================================
 app.use(notFound);
 app.use(errorHandler);
 
