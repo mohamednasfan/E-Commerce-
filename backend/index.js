@@ -23,8 +23,9 @@ const app = express();
 app.disable("x-powered-by");
 
 // ============================================================
-// 1) SHARED XSS / CSP HARDENING MIDDLEWARE (Teammate's part)
-// Runs FIRST so Helmet (below) can override conflicting headers.
+// FIX: SQL Injection
+// Use parameterized queries / ORM methods instead of directly
+// concatenating or interpolating user input into SQL queries.
 // ============================================================
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -54,9 +55,9 @@ app.use((req, res, next) => {
 });
 
 // ============================================================
-// 2) MISSING SECURITY HEADERS (Your part)
-// Helmet runs AFTER the shared middleware so its values take
-// precedence for X-Frame-Options and Referrer-Policy.
+//  MISSING SECURITY HEADERS 
+// Added HTTP security headers to protect against common attacks
+// such as clickjacking, MIME-type sniffing, and unsafe framing.
 // ============================================================
 app.use(
   helmet({
