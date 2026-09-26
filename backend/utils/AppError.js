@@ -1,8 +1,9 @@
-// fix sensitive error disclosure: "operational error class that outputs safe user-facing error messages instead of technical system traces"
+// sensitive error disclosure - custom operational error class to distinguish safe user-facing errors from raw internal server exceptions
 class AppError extends Error {
   constructor(message, statusCode = 500) {
     super(message);
     this.statusCode = statusCode;
+     // sensitive error disclosure - marks error as operational so errorHandler can safely send message without leaking stack traces
     this.isOperational = true;
     Error.captureStackTrace(this, this.constructor);
   }

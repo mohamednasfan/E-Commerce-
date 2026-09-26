@@ -5,6 +5,7 @@ dotenv.config();
 
 const isDev = () => process.env.NODE_ENV === "development";
 
+// sensitive error disclosure - map raw library database and system errors to safe operational messages
 function mapKnownLibraryError(err) {
   if (err.name === "CastError") {
     return new AppError("Invalid ID format", 400);
@@ -33,12 +34,14 @@ function mapKnownLibraryError(err) {
   return null;
 }
 
+// sensitive error disclosure - detect patterns revealing internal stack traces, DB connection strings, or system paths
 function looksLikeInternalDetail(message = "") {
   return /at\s+\S+\s+\(|Cast to ObjectId|E11000|MongoServerError|ValidationError|path `|mongodb(\+srv)?:\/\/|ENOENT|ECONNREFUSED|stack/i.test(
     message
   );
 }
 
+// sensitive error disclosure - scrub unhandled internal messages and stack traces from non-dev HTTP client responses
 function getClientMessage(err, statusCode) {
   if (err.isOperational) {
     return err.message;
