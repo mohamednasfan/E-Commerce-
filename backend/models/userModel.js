@@ -5,12 +5,17 @@ const userSchema = mongoose.Schema(
     username: {
       type: String,
       required: true,
+      minlength: 3,
+      maxlength: 50,
     },
 
     email: {
       type: String,
       required: true,
       unique: true,
+      lowercase: true,
+      match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+      maxlength: 254,
     },
 
     password: {
