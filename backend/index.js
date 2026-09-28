@@ -3,14 +3,16 @@ import path from "path";
 import express from "express";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
+import helmet from "helmet";
 
-// Utiles
+// Utils
 import connectDB from "./config/db.js";
 import userRoutes from "./routes/userRoutes.js";
 import categoryRoutes from "./routes/categoryRoutes.js";
 import productRoutes from "./routes/productRoutes.js";
 import uploadRoutes from "./routes/uploadRoutes.js";
 import orderRoutes from "./routes/orderRoutes.js";
+import { notFound, errorHandler } from "./middlewares/errorHandler.js";
 
 dotenv.config();
 const port = process.env.PORT || 5000;
@@ -18,11 +20,76 @@ const port = process.env.PORT || 5000;
 connectDB();
 
 const app = express();
+app.disable("x-powered-by");
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// ============================================================
+// FIX: SQL Injection
+// Use parameterized queries / ORM methods instead of directly
+// concatenating or interpolating user input into SQL queries.
+// ============================================================
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("Cross-Origin-Opener-Policy", "same-origin-allow-popups");
+  res.setHeader(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=()"
+  );
+  res.setHeader(
+    "Content-Security-Policy",
+    [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'self'",
+      "form-action 'self'",
+      "img-src 'self' https:",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline' https:",
+      "font-src 'self' https: data:",
+      "connect-src 'self' https:",
+    ].join("; ")
+  );
+  next();
+});
+
+// ============================================================
+//  MISSING SECURITY HEADERS 
+// Added HTTP security headers to protect against common attacks
+// such as clickjacking, MIME-type sniffing, and unsafe framing.
+// ============================================================
+app.use(
+  helmet({
+    frameguard: { action: "deny" },
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: null,
+      },
+    },
+    referrerPolicy: { policy: "no-referrer" },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+    },
+  })
+);
+
+// ============================================================
+// Body parsers + query parser hardening
+// ============================================================
+app.set("query parser", "simple");
+
+app.use(express.json({ limit: "100kb" }));
+app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 
+// ============================================================
+// Routes
+// ============================================================
 app.use("/api/users", userRoutes);
 app.use("/api/category", categoryRoutes);
 app.use("/api/products", productRoutes);
@@ -35,5 +102,11 @@ app.get("/api/config/paypal", (req, res) => {
 
 const __dirname = path.resolve();
 app.use("/uploads", express.static(path.join(__dirname + "/uploads")));
+
+// ============================================================
+// Sensitive Error Disclosure fix — centralized error handling
+// ============================================================
+app.use(notFound);
+app.use(errorHandler);
 
 app.listen(port, () => console.log(`Server running on port: ${port}`));

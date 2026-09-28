@@ -1,7 +1,6 @@
+// fix sensitive error disclosure: "forwards async route errors to central error handler instead of exposing raw error messages"
 const asyncHandler = (fn) => (req, res, next) => {
-  Promise.resolve(fn(req, res, next)).catch((error) => {
-    res.status(500).json({ message: error.message });
-  });
+  Promise.resolve(fn(req, res, next)).catch(next);
 };
 
 export default asyncHandler;
