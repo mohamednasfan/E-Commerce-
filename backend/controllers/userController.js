@@ -176,6 +176,9 @@ const loginWithGoogle = asyncHandler(async (req, res) => {
 const logoutCurrentUser = asyncHandler(async (req, res) => {
   res.cookie("jwt", "", {
     httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
     expires: new Date(0),
   });
 
@@ -183,7 +186,7 @@ const logoutCurrentUser = asyncHandler(async (req, res) => {
 });
 
 const getAllUsers = asyncHandler(async (req, res) => {
-  const users = await User.find({});
+  const users = await User.find({}).select("-password -loginAttempts -lockUntil");
   res.json(users);
 });
 
@@ -210,6 +213,13 @@ const updateCurrentUserProfile = asyncHandler(async (req, res) => {
     user.email = req.body.email || user.email;
 
     if (req.body.password) {
+      if (!isStrongPassword(req.body.password)) {
+        return res.status(400).json({
+          message:
+            "Password must be at least 8 characters and include uppercase, lowercase, a number, and a special character.",
+        });
+      }
+
       const salt = await bcrypt.genSalt(10);
       const hashedPassword = await bcrypt.hash(req.body.password, salt);
       user.password = hashedPassword;
