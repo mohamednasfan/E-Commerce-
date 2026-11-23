@@ -11,7 +11,6 @@ import {
   FaStar,
   FaStore,
 } from "react-icons/fa";
-import { safeImageUrl } from "../../Utils/safeUrl";
 
 const ProductCarousel = () => {
   const { data: products, isLoading, error } = useGetTopProductsQuery();
@@ -54,7 +53,7 @@ const ProductCarousel = () => {
             }) => (
               <div key={_id}>
                 <img
-                  src={safeImageUrl(image)}
+                  src={image}
                   alt={name}
                   className="w-full rounded-lg object-cover h-[30rem]"
                 />

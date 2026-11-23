@@ -9,7 +9,6 @@ import {
 } from "../../redux/api/productApiSlice";
 import { useFetchCategoriesQuery } from "../../redux/api/categoryApiSlice";
 import { toast } from "react-toastify";
-import { safeImageUrl } from "../../Utils/safeUrl";
 
 const AdminProductUpdate = () => {
   const params = useParams();
@@ -143,7 +142,7 @@ const AdminProductUpdate = () => {
             {image && (
               <div className="text-center">
                 <img
-                  src={safeImageUrl(typeof image === "string" ? image : "")}
+                  src={image}
                   alt="product"
                   className="block mx-auto w-full h-[40%]"
                 />

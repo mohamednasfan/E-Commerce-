@@ -32,12 +32,10 @@ const fileFilter = (req, file, cb) => {
 const upload = multer({ storage, fileFilter });
 const uploadSingleImage = upload.single("image");
 
-router.post("/", (req, res, next) => {
+router.post("/", (req, res) => {
   uploadSingleImage(req, res, (err) => {
     if (err) {
-      // fix sensitive error disclosure: pass error to error handler middleware
-      res.status(400);
-      return next(err);
+      res.status(400).send({ message: err.message });
     } else if (req.file) {
       res.status(200).send({
         message: "Image uploaded successfully",

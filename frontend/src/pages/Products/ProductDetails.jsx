@@ -20,7 +20,6 @@ import HeartIcon from "./HeartIcon";
 import Ratings from "./Ratings";
 import ProductTabs from "./ProductTabs";
 import { addToCart } from "../../redux/features/cart/cartSlice";
-import { safeImageUrl } from "../../Utils/safeUrl";
 
 const ProductDetails = () => {
   const { id: productId } = useParams();
@@ -86,7 +85,7 @@ const ProductDetails = () => {
           <div className="flex flex-wrap relative items-between mt-[2rem] ml-[10rem]">
             <div>
               <img
-                src={safeImageUrl(product.image)}
+                src={product.image}
                 alt={product.name}
                 className="w-full xl:w-[50rem] lg:w-[45rem] md:w-[30rem] sm:w-[20rem] mr-[2rem]"
               />

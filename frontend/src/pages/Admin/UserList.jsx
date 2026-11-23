@@ -8,7 +8,6 @@ import {
   useUpdateUserMutation,
 } from "../../redux/api/usersApiSlice";
 import { toast } from "react-toastify";
-import { safeMailto } from "../../Utils/safeUrl";
 // ⚠️⚠️⚠️ don't forget this ⚠️⚠️⚠️⚠️
 // import AdminMenu from "./AdminMenu";
 
@@ -131,11 +130,7 @@ const UserList = () => {
                       </div>
                     ) : (
                       <div className="flex items-center">
-                        {safeMailto(user.email) ? (
-                          <a href={safeMailto(user.email)}>{user.email}</a>
-                        ) : (
-                          <span>{user.email}</span>
-                        )}{" "}
+                        <a href={`mailto:${user.email}`}>{user.email}</a>{" "}
                         <button
                           onClick={() =>
                             toggleEdit(user._id, user.name, user.email)

@@ -1,9 +1,7 @@
 import express from "express";
-import rateLimit from "express-rate-limit";
 import {
   createUser,
   loginUser,
-  loginWithGoogle,
   logoutCurrentUser,
   getAllUsers,
   getCurrentUserProfile,
@@ -17,29 +15,12 @@ import { authenticate, authorizeAdmin } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
-const loginRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 5,
-  standardHeaders: "draft-7",
-  legacyHeaders: false,
-  message: { message: "Too many login attempts. Try again later." },
-});
-
-const registrationRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  limit: 10,
-  standardHeaders: "draft-7",
-  legacyHeaders: false,
-  message: { message: "Too many registration attempts. Try again later." },
-});
-
 router
   .route("/")
-  .post(registrationRateLimiter, createUser)
+  .post(createUser)
   .get(authenticate, authorizeAdmin, getAllUsers);
 
-router.post("/auth", loginRateLimiter, loginUser);
-router.post("/auth/google", loginRateLimiter, loginWithGoogle);
+router.post("/auth", loginUser);
 router.post("/logout", logoutCurrentUser);
 
 router
